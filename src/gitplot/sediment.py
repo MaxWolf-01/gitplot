@@ -1,87 +1,17 @@
-"""Sediment chart: stacked area chart showing code age layers over time.
+"""Sediment chart: stacked area chart showing code age layers over time."""
 
-For each sampled commit, runs git blame on every tracked file to determine
-when each line was originally written. The result is a stacked area chart
-where each color band represents code from a specific time period.
-"""
-
-import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Annotated, Literal
 
 import altair as alt
 import polars as pl
 import tyro
 
-from gitplot.data import SCHEMA, load_existing, save_data
-from gitplot.git import blame_timestamps, get_all_commits, resolve_repo, sample_evenly, tracked_files
-
-
-def _log(msg: str, quiet: bool = False) -> None:
-    if not quiet:
-        print(msg, file=sys.stderr)
-
-
-def _analyze_commit(
-    repo: str,
-    commit: str,
-    commit_date: datetime,
-    exts: list[str] | None,
-    file_workers: int = 4,
-) -> list[tuple[str, float, int]]:
-    """Blame every tracked file at a commit. Returns (hash, commit_ts, line_ts) rows."""
-    files = tracked_files(repo, commit, exts)
-    rows: list[tuple[str, float, int]] = []
-    ct = commit_date.timestamp()
-
-    with ThreadPoolExecutor(max_workers=file_workers) as ex:
-        futs = {ex.submit(blame_timestamps, repo, commit, f): f for f in files}
-        for fut in as_completed(futs):
-            for ts in fut.result():
-                rows.append((commit, ct, ts))
-    return rows
-
-
-def collect(
-    repo_path: str,
-    sampled: list[tuple[str, datetime]],
-    existing: pl.DataFrame | None,
-    exts: list[str] | None,
-    workers: int,
-    quiet: bool,
-) -> pl.DataFrame:
-    """Collect blame data, skipping already-analyzed commits."""
-    already_done: set[str] = set()
-    if existing is not None:
-        already_done = set(existing["commit_hash"].unique().to_list())
-
-    todo = [(h, d) for h, d in sampled if h not in already_done]
-
-    if not todo:
-        _log("All sampled commits already analyzed.", quiet)
-        return existing  # type: ignore[return-value]
-
-    _log(f"{len(todo)} commits to analyze.", quiet)
-    new_rows: list[tuple[str, float, int]] = []
-    total = len(todo)
-
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        futs = {ex.submit(_analyze_commit, repo_path, h, d, exts): h for h, d in todo}
-        for i, fut in enumerate(as_completed(futs), 1):
-            h = futs[fut]
-            _log(f"  [{i}/{total}] {h[:8]}", quiet)
-            new_rows.extend(fut.result())
-
-    new_df = pl.DataFrame(new_rows, schema=SCHEMA, orient="row")
-    return pl.concat([existing, new_df]) if existing is not None else new_df
+from gitplot.collect import ensure_data
 
 
 def render(df: pl.DataFrame, granularity: Literal["year", "quarter"], since: datetime | None) -> alt.Chart:
-    """Build the stacked area chart from blame data."""
-
     def period(ts: int) -> str:
         dt = datetime.fromtimestamp(ts)
         if granularity == "year":
@@ -153,25 +83,8 @@ class Sediment:
 
 
 def run(args: Sediment) -> None:
-    repo_path, repo_name = resolve_repo(args.repo)
-    if not args.quiet:
-        _log(f"Resolving {args.repo}...", args.quiet)
-    repo_str = str(repo_path)
-
-    exts = [e.strip() for e in args.extensions.split(",") if e.strip()] or None
-    exts_key = args.extensions.strip()
     since = datetime.strptime(args.since, "%Y-%m-%d") if args.since else None
-
-    data_dir = Path(args.output) / repo_name / "sediment"
-    existing = load_existing(data_dir, exts_key)
-
-    all_commits = get_all_commits(repo_str)
-    sampled = sample_evenly(all_commits, args.samples)
-    _log(f"{len(all_commits)} commits in repo, sampling {len(sampled)}.", args.quiet)
-
-    df = collect(repo_str, sampled, existing, exts, args.workers, args.quiet)
-    save_data(data_dir, df, args.repo, exts_key)
-    _log(f"Data saved: {data_dir / 'blame.parquet'}", args.quiet)
+    df, data_dir, _ = ensure_data(args.repo, args.samples, args.workers, args.extensions, args.output, args.quiet)
 
     chart = render(df, args.granularity, since)
 
@@ -180,6 +93,8 @@ def run(args: Sediment) -> None:
         parts.append(f"since{args.since}")
     filename = "-".join(parts) + f".{args.format}"
 
-    out_path = data_dir / filename
+    chart_dir = data_dir / "sediment"
+    chart_dir.mkdir(parents=True, exist_ok=True)
+    out_path = chart_dir / filename
     chart.save(str(out_path))
     print(out_path)

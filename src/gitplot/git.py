@@ -7,7 +7,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-TIMESTAMP_RE = re.compile(r"\(.*?\s+(\d{10})\s+[+-]\d{4}\s+\d+\)")
+BLAME_RE = re.compile(r"\((.+?)\s+(\d{10})\s+[+-]\d{4}\s+\d+\)")
 
 
 def run_git(cmd: list[str], cwd: str) -> str:
@@ -69,10 +69,10 @@ def tracked_files(repo: str, commit: str, exts: list[str] | None) -> list[str]:
     return files
 
 
-def blame_timestamps(repo: str, commit: str, path: str) -> list[int]:
-    """Return unix timestamps for each line in a file at a given commit."""
+def blame_lines(repo: str, commit: str, path: str) -> list[tuple[int, str]]:
+    """Return (unix_timestamp, author) for each line in a file at a given commit."""
     try:
         out = run_git(["git", "blame", "-t", commit, "--", path], repo)
-    except (RuntimeError, UnicodeDecodeError):
+    except RuntimeError, UnicodeDecodeError:
         return []
-    return [int(m.group(1)) for line in out.split("\n") if line and (m := TIMESTAMP_RE.search(line))]
+    return [(int(m.group(2)), m.group(1).strip()) for line in out.split("\n") if line and (m := BLAME_RE.search(line))]

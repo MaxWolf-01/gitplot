@@ -6,7 +6,7 @@ from pathlib import Path
 
 import polars as pl
 
-SCHEMA = {"commit_hash": pl.Utf8, "commit_date": pl.Float64, "line_timestamp": pl.Int64}
+SCHEMA = {"commit_hash": pl.Utf8, "commit_date": pl.Float64, "line_timestamp": pl.Int64, "author": pl.Utf8}
 
 
 def load_existing(data_dir: Path, exts_key: str) -> pl.DataFrame | None:
