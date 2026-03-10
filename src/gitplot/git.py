@@ -69,6 +69,73 @@ def tracked_files(repo: str, commit: str, exts: list[str] | None) -> list[str]:
     return files
 
 
+def get_log_numstat(repo: str) -> list[tuple[str, float, str, str, int, int]]:
+    """Parse git log --numstat. Returns (hash, timestamp, author, file, insertions, deletions)."""
+    out = run_git(["git", "log", "--numstat", "--no-merges", "--format=COMMIT %H %at %aN"], repo)
+    rows: list[tuple[str, float, str, str, int, int]] = []
+    current_hash = current_author = None
+    current_ts = 0.0
+
+    for line in out.split("\n"):
+        if line.startswith("COMMIT "):
+            parts = line.split(" ", 3)
+            current_hash = parts[1]
+            current_ts = float(parts[2])
+            current_author = parts[3]
+        elif line and "\t" in line and current_hash:
+            parts = line.split("\t")
+            if len(parts) == 3 and parts[0] != "-":
+                rows.append((current_hash, current_ts, current_author, parts[2], int(parts[0]), int(parts[1])))
+
+    return rows
+
+
+def get_coauthor_map(repo: str) -> dict[str, list[str]]:
+    """Parse all commit messages for Co-Authored-By trailers.
+
+    Returns short_hash (8 chars) -> [co-author names].
+    Uses short hashes to match git blame output.
+    """
+    out = run_git(["git", "log", "--format=%H%n%b%nEND_COMMIT"], repo)
+    result: dict[str, list[str]] = {}
+    current_hash = None
+    coauthors: list[str] = []
+
+    for line in out.split("\n"):
+        if line == "END_COMMIT":
+            if current_hash and coauthors:
+                result[current_hash[:8]] = coauthors
+            current_hash = None
+            coauthors = []
+        elif len(line) == 40 and all(c in "0123456789abcdef" for c in line):
+            current_hash = line
+            coauthors = []
+        elif "Co-Authored-By:" in line or "Co-authored-by:" in line:
+            part = line.split(":", 1)[1].strip()
+            name = part.split("<")[0].strip() if "<" in part else part
+            if name:
+                coauthors.append(name)
+
+    return result
+
+
+def blame_lines_with_hash(repo: str, commit: str, path: str) -> list[tuple[str, int, str]]:
+    """Return (commit_hash, unix_timestamp, author) for each line in a file."""
+    try:
+        out = run_git(["git", "blame", "-t", commit, "--", path], repo)
+    except RuntimeError, UnicodeDecodeError:
+        return []
+    results = []
+    for line in out.split("\n"):
+        if not line:
+            continue
+        m = BLAME_RE.search(line)
+        if m:
+            line_hash = line.split()[0].lstrip("^")
+            results.append((line_hash, int(m.group(2)), m.group(1).strip()))
+    return results
+
+
 def blame_lines(repo: str, commit: str, path: str) -> list[tuple[int, str]]:
     """Return (unix_timestamp, author) for each line in a file at a given commit."""
     try:
