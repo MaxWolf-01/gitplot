@@ -56,8 +56,11 @@ class BusFactor:
     min_lines: int = 20
     """Minimum lines of code to include a file."""
 
-    extensions: str = ".py,.js,.ts,.java,.c,.cpp,.h,.go,.rs,.rb,.md"
-    """Comma-separated file extensions to analyze (empty string for all)."""
+    include: str | None = None
+    """Only analyze files whose path matches this regex (default: all files)."""
+
+    exclude: str | None = None
+    """Skip files whose path matches this regex."""
 
     output: str = "output"
     """Base output directory."""
@@ -70,7 +73,9 @@ class BusFactor:
 
 
 def run(args: BusFactor) -> None:
-    df, data_dir, _ = ensure_busfactor_data(args.repo, args.extensions, args.workers, args.output, args.quiet)
+    df, data_dir, _ = ensure_busfactor_data(
+        args.repo, args.include, args.exclude, args.workers, args.output, args.quiet
+    )
 
     chart = render(df, args.top_n, args.min_lines)
 

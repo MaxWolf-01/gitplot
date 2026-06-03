@@ -66,8 +66,11 @@ class Sediment:
     granularity: Literal["year", "quarter"] = "quarter"
     """Time bucket for grouping lines by age."""
 
-    extensions: str = ".py,.js,.ts,.java,.c,.cpp,.h,.go,.rs,.rb,.md"
-    """Comma-separated file extensions to analyze (empty string for all)."""
+    include: str | None = None
+    """Only analyze files whose path matches this regex (default: all files)."""
+
+    exclude: str | None = None
+    """Skip files whose path matches this regex."""
 
     since: str | None = None
     """Only render commits after this date (YYYY-MM-DD). Does not affect stored data."""
@@ -84,7 +87,9 @@ class Sediment:
 
 def run(args: Sediment) -> None:
     since = datetime.strptime(args.since, "%Y-%m-%d") if args.since else None
-    df, data_dir, _ = ensure_data(args.repo, args.samples, args.workers, args.extensions, args.output, args.quiet)
+    df, data_dir, _ = ensure_data(
+        args.repo, args.samples, args.workers, args.include, args.exclude, args.output, args.quiet
+    )
 
     chart = render(df, args.granularity, since)
 

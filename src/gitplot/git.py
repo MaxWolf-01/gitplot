@@ -61,11 +61,15 @@ def sample_evenly(commits: list[tuple[str, datetime]], n: int) -> list[tuple[str
     return [commits[i] for i in indices]
 
 
-def tracked_files(repo: str, commit: str, exts: list[str] | None) -> list[str]:
+def tracked_files(
+    repo: str, commit: str, include: re.Pattern[str] | None = None, exclude: re.Pattern[str] | None = None
+) -> list[str]:
     out = run_git(["git", "ls-tree", "-r", "--name-only", commit], repo)
     files = [f for f in out.strip().split("\n") if f]
-    if exts:
-        files = [f for f in files if any(f.endswith(e) for e in exts)]
+    if include is not None:
+        files = [f for f in files if include.search(f)]
+    if exclude is not None:
+        files = [f for f in files if not exclude.search(f)]
     return files
 
 
